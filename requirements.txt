@@ -1,0 +1,4 @@
+Flask
+discord.py
+requests
+psycopg2-binary
