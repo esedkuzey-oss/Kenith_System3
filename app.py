@@ -120,7 +120,7 @@ async def create_license(ctx, arg1: str, member: discord.Member = None):
         if existing_license:
             cursor.close()
             conn.close()
-            await ctx.send("Kişinin üzerinde license mevcut")
+            await ctx.send("Kişinin üzerinde zaten aktif bir lisans mevcut!")
             return
 
         cursor.execute("DELETE FROM kenith_licenses WHERE discord_user = %s", (user_id_str,))
@@ -257,27 +257,31 @@ async def freeze_command(ctx, sub_action: str = None, member: discord.Member = N
 
 @bot.command(name="hwid")
 @commands.has_permissions(administrator=True)
-async def hwid_command(ctx, action: str = None, member: discord.Member = None):
-    if not action or action.lower() != "reset" or not member:
-        await ctx.send("Kullanım: `!hwid reset @Kullanici`")
+async def hwid_command(ctx, action: str = None, target: str = None):
+    if not action or action.lower() != "reset" or not target:
+        await ctx.send("Kullanım:\n`!hwid reset @Kullanici` veya `!hwid reset K123-4567-8901`")
         return
-
-    user_id_str = str(member.id)
 
     conn = get_db()
     cursor = conn.cursor()
-    cursor.execute("UPDATE kenith_licenses SET hwid = '', expires_at = '', status = 'ACTIVE' WHERE discord_user = %s", (user_id_str,))
+
+    # İster etiket (@Kullanici) ister doğrudan Key yazılarak HWID sıfırlanabilir
+    if target.startswith("<@") and target.endswith(">"):
+        user_id_str = target.replace("<@", "").replace(">", "").replace("!", "")
+        cursor.execute("UPDATE kenith_licenses SET hwid = '', expires_at = '', status = 'ACTIVE' WHERE discord_user = %s", (user_id_str,))
+    else:
+        cursor.execute("UPDATE kenith_licenses SET hwid = '', expires_at = '', status = 'ACTIVE' WHERE key = %s", (target.strip(),))
     
     if cursor.rowcount == 0:
         cursor.close()
         conn.close()
-        await ctx.send("Bu kullanıcıya ait lisans bulunamadı.")
+        await ctx.send("Eşleşen kayıt bulunamadı.")
         return
 
     conn.commit()
     cursor.close()
     conn.close()
-    await ctx.send(f"{member.mention} kullanıcısının HWID'si sıfırlandı.")
+    await ctx.send(f"✅ Belirtilen kaydın HWID kilidi başarıyla kaldırıldı.")
 
 
 @create_license.error
