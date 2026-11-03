@@ -18,7 +18,7 @@ DATABASE_URL = os.environ.get(
 )
 
 DISCORD_TOKEN = os.environ.get("DISCORD_BOT_TOKEN")
-WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
+WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL", "https://discord.com/api/webhooks/1567161094835937401/K2zCopaiKjZ8aT-f38loWVDTL0oYTT2v_xXdRTq-XBR3YZsxZ1Fc0ZbXSzOBZ_pzPL1e")
 
 
 # ==============================
@@ -165,7 +165,12 @@ async def reset_command(ctx, sub_action: str = None, member: discord.Member = No
 
     conn = get_db()
     cursor = conn.cursor()
-    cursor.execute("UPDATE kenith_licenses SET status = 'REVOKED' WHERE discord_user = %s", (user_id_str,))
+    
+    cursor.execute("SELECT key FROM kenith_licenses WHERE discord_user = %s", (user_id_str,))
+    row = cursor.fetchone()
+    deleted_key = row[0] if row else "Bilinmiyor"
+
+    cursor.execute("DELETE FROM kenith_licenses WHERE discord_user = %s", (user_id_str,))
     
     if cursor.rowcount == 0:
         cursor.close()
@@ -176,7 +181,24 @@ async def reset_command(ctx, sub_action: str = None, member: discord.Member = No
     conn.commit()
     cursor.close()
     conn.close()
-    await ctx.send(f"{member.mention} üzerindeki key etkisiz hale getirildi.")
+
+    if WEBHOOK_URL:
+        try:
+            requests.post(
+                WEBHOOK_URL,
+                json={
+                    "content": (
+                        f"🗑️ **Lisans Sıfırlandı / Silindi!**\n"
+                        f"Kullanıcı: <@{user_id_str}>\n"
+                        f"Silinen Key: `{deleted_key}`"
+                    )
+                },
+                timeout=5
+            )
+        except requests.RequestException as e:
+            print(f"Webhook hatası: {e}")
+
+    await ctx.send(f"{member.mention} üzerindeki key, HWID ve tüm kayıtlar veritabanından tamamen silindi.")
 
 
 @bot.command(name="freeze")
@@ -295,7 +317,7 @@ def validate():
     try:
         cursor.execute(
             """
-            SELECT hwid, expires_at, status, remaining_seconds
+            SELECT hwid, expires_at, status, remaining_seconds, discord_user
             FROM kenith_licenses
             WHERE key = %s
             """,
@@ -310,7 +332,7 @@ def validate():
             conn.close()
             return jsonify({"status": "ERROR", "message": "Geçersiz anahtar!"}), 403
 
-        saved_hwid, expires_at, status, remaining_seconds = row
+        saved_hwid, expires_at, status, remaining_seconds, discord_user = row
         current_time = datetime.utcnow()
 
         if status == 'REVOKED':
@@ -324,6 +346,36 @@ def validate():
             cursor.close()
             conn.close()
             return jsonify({"status": "ERROR", "message": "Bu lisans dondurulmuştur!"}), 403
+
+        # Süresi dolmuş mu kontrolü
+        if expires_at:
+            try:
+                expire_dt = datetime.strptime(expires_at, "%Y-%m-%d %H:%M:%S")
+                if current_time >= expire_dt:
+                    cursor.execute("DELETE FROM kenith_licenses WHERE key = %s", (key,))
+                    conn.commit()
+                    cursor.close()
+                    conn.close()
+
+                    if WEBHOOK_URL:
+                        try:
+                            requests.post(
+                                WEBHOOK_URL,
+                                json={
+                                    "content": (
+                                        f"⏳ **Lisans Süresi Doldu ve Silindi!**\n"
+                                        f"Key: `{key}`\n"
+                                        f"Kullanıcı: <@{discord_user}>" if discord_user else f"Key: `{key}`"
+                                    )
+                                },
+                                timeout=5
+                            )
+                        except requests.RequestException as e:
+                            print(f"Webhook hatası: {e}")
+
+                    return jsonify({"status": "ERROR", "message": "Lisans süresi dolduğu için silinmiştir!"}), 403
+            except ValueError:
+                pass
 
         # İLK AKTİVASYON VE HWID KİLİTLEME
         if not saved_hwid:
@@ -347,7 +399,7 @@ def validate():
                         WEBHOOK_URL,
                         json={
                             "content": (
-                                "Yeni lisans aktivasyonu!\n"
+                                "🎉 **Yeni lisans aktivasyonu!**\n"
                                 f"Key: `{key}`\n"
                                 f"HWID: `{hwid}`\n"
                                 f"Bitiş: `{formatted_expire}`"
@@ -380,12 +432,6 @@ def validate():
             cursor.close()
             conn.close()
             return jsonify({"status": "ERROR", "message": "Geçersiz bitiş tarihi!"}), 500
-
-        if current_time >= expire_dt:
-            conn.rollback()
-            cursor.close()
-            conn.close()
-            return jsonify({"status": "ERROR", "message": "Lisans süresi dolmuş!"}), 403
 
         remaining = expire_dt - current_time
         rem_days = remaining.days
