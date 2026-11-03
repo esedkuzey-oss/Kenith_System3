@@ -265,7 +265,6 @@ async def hwid_command(ctx, action: str = None, target: str = None):
     conn = get_db()
     cursor = conn.cursor()
 
-    # İster etiket (@Kullanici) ister doğrudan Key yazılarak HWID sıfırlanabilir
     if target.startswith("<@") and target.endswith(">"):
         user_id_str = target.replace("<@", "").replace(">", "").replace("!", "")
         cursor.execute("UPDATE kenith_licenses SET hwid = '', expires_at = '', status = 'ACTIVE' WHERE discord_user = %s", (user_id_str,))
@@ -403,7 +402,8 @@ def validate():
                         WEBHOOK_URL,
                         json={
                             "content": (
-                                "🎉 **Yeni lisans aktivasyonu!**\n"
+                                f"🎉 **Yeni lisans aktivasyonu!**\n"
+                                f"Kullanıcı: <@{discord_user}>\n"
                                 f"Key: `{key}`\n"
                                 f"HWID: `{hwid}`\n"
                                 f"Bitiş: `{formatted_expire}`"
